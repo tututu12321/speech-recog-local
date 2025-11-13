@@ -2,7 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>ローカル音声認識（ゆるゆる版 / ChatGPTプロンプト付き）</title>
+<title>ローカル音声認識（ChatGPTプロンプト付き）</title>
+
 <style>
 body {
     font-family: sans-serif;
@@ -21,10 +22,11 @@ textarea {
     padding: 10px;
 }
 </style>
+
 </head>
 <body>
 
-<h2>ローカル音声認識（ゆるゆる版 / 日本語・英語切替）</h2>
+<h2>ローカル音声認識（ChatGPTプロンプト付き / 日本語・英語切替）</h2>
 
 <label>言語：</label>
 <select id="langSelect">
@@ -58,34 +60,31 @@ textarea {
 </textarea>
 
 <script>
+
 let recognition;
 let isRecognizing = false;
 
-// ゆるい前回テキスト記録
+// 前回の確定テキスト
 let lastText = "";
 
-// ▼ ゆるゆる重複防止（語尾1語だけ）
-function isDuplicate(newText, prevText) {
-    const nt = newText.trim().split(/\s+/);
-    const pt = prevText.trim().split(/\s+/);
-
-    const ntail = nt.slice(-1)[0];
-    const ptail = pt.slice(-1)[0];
-
-    return ntail === ptail;
-}
-
-// ▼ ゆるゆる暴走防止（極端な繰り返しのみブロック）
-function isNoisePattern(text) {
-    // 母音系の6連続以上
-    if (/([あいうえおアイウエオおーぁぃぅぇぉoaiue])\1{5,}/.test(text)) return true;
-
-    // 英単語の8連続以上
-    if (/(\b\w+\b)( \1){7,}/i.test(text)) return true;
-
+// 母音・ノイズ暴走の簡易フィルタ（ゆるめ）
+function isNoisePattern(t) {
+    if (/([あいうえおアイウエオoaiue])\1{3,}/i.test(t)) return true;
+    if (/(\b\w+\b)( \1){3,}/i.test(t)) return true;
     return false;
 }
 
+// 先頭80%が同じなら「ほぼ同じ」と判断
+function isTooSimilar(a, b) {
+    if (!a || !b) return false;
+
+    const minLen = Math.min(a.length, b.length);
+    const seg = Math.floor(minLen * 0.8);
+
+    return a.slice(0, seg) === b.slice(0, seg);
+}
+
+// 初期化
 function initRecognition(lang) {
     try {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -94,20 +93,18 @@ function initRecognition(lang) {
         recognition.interimResults = false;
         recognition.continuous = true;
     } catch (e) {
-        alert("このブラウザは音声認識に対応していません。Chromeを使用してください。");
+        alert("Chrome を使用してください。（音声認識 API 非対応）");
         return;
     }
 
     recognition.onresult = (event) => {
-        let finalText = event.results[event.results.length - 1][0].transcript.trim();
+        const finalText = event.results[event.results.length - 1][0].transcript.trim();
 
-        // ▼ ゆるゆる暴走防止
+        // ノイズ暴走排除（ゆるめ）
         if (isNoisePattern(finalText)) return;
 
-        // ▼ ゆるゆる重複防止
-        if (isDuplicate(finalText, lastText)) {
-            return;
-        }
+        // 80%類似 → 重複扱いで無視（暴走連鎖を止める）
+        if (isTooSimilar(finalText, lastText)) return;
 
         lastText = finalText;
 
@@ -123,6 +120,7 @@ function initRecognition(lang) {
 // 初期言語
 initRecognition("ja-JP");
 
+// DOM
 const output = document.getElementById("output");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
@@ -133,8 +131,9 @@ const langSelect = document.getElementById("langSelect");
 // 言語変更
 langSelect.onchange = () => {
     const lang = langSelect.value;
+    const running = isRecognizing;
 
-    lastText = ""; // リセット
+    lastText = "";
 
     if (isRecognizing) {
         recognition.stop();
@@ -143,8 +142,10 @@ langSelect.onchange = () => {
 
     initRecognition(lang);
 
-    recognition.start();
-    isRecognizing = true;
+    if (running) {
+        recognition.start();
+        isRecognizing = true;
+    }
 
     output.value += `\n--- 言語を変更しました (${lang}) ---\n`;
 };
@@ -177,7 +178,6 @@ saveBtn.onclick = () => {
     a.href = url;
     a.download = "transcript_" + new Date().toISOString().replace(/[:.]/g, "-") + ".txt";
     a.click();
-
     URL.revokeObjectURL(url);
 };
 
@@ -187,7 +187,10 @@ copyBtn.onclick = () => {
     document.execCommand("copy");
     alert("コピーしました");
 };
+
 </script>
 
 </body>
 </html>
+
+
