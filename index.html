@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Local Speech Recognition + ChatGPT Prompt</title>
+<title>ローカル音声認識（ChatGPTプロンプト付き）</title>
 <style>
 body {
     font-family: sans-serif;
@@ -61,10 +61,36 @@ textarea {
 let recognition;
 let isRecognizing = false;
 
-// ★ 重複防止（語尾10文字を記録）
-let lastTail = "";
+// ★ 前回の確定テキスト
+let lastText = "";
 
-// 初期化
+// ★ 前回の認識時刻（暴走防止用）
+let lastTime = 0;
+
+// ★★★ 強力重複フィルタ（語尾3語 N-gram 判定）★★★
+function isDuplicate(newText, prevText) {
+    const nt = newText.trim().split(/\s+/);
+    const pt = prevText.trim().split(/\s+/);
+
+    const N = 3;
+    const ntail = nt.slice(-N).join(" ");
+    const ptail = pt.slice(-N).join(" ");
+
+    return ntail === ptail;
+}
+
+// ★★★ 誤認識暴走フィルタ（母音連打・記号崩壊など）★★★
+function isNoisePattern(text) {
+    // 「おおおおお」「ううううう」「iii」「おいおいおい…」
+    if (/([あいうえおアイウエオおーうぃoaiue])\1{3,}/.test(text)) return true;
+
+    // 英語暴走パターン
+    if (/(\b\w+\b)( \1){3,}/i.test(text)) return true;
+
+    return false;
+}
+
+// ★ 初期化
 function initRecognition(lang) {
     try {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -73,21 +99,27 @@ function initRecognition(lang) {
         recognition.interimResults = false;
         recognition.continuous = true;
     } catch (e) {
-        alert("SpeechRecognition API がサポートされていません。Chrome を使用してください。");
+        alert("このブラウザは音声認識に対応していません。Chromeを使用してください。");
+        return;
     }
 
     recognition.onresult = (event) => {
         let finalText = event.results[event.results.length - 1][0].transcript.trim();
 
-        // ★ 文末10文字を抽出
-        const tailLen = 10;
-        const currentTail = finalText.slice(-tailLen);
+        // ▼ 暴走パターン排除
+        if (isNoisePattern(finalText)) return;
 
-        // ★ 重複防止：文末一致で弾く
-        if (currentTail === lastTail) {
-            return;
+        // ▼ 1秒以内に同じようなものが来たら排除
+        const now = Date.now();
+        if (now - lastTime < 1000) {
+            if (isDuplicate(finalText, lastText)) return;
         }
-        lastTail = currentTail;
+        lastTime = now;
+
+        // ▼ 語尾N-gram 重複排除
+        if (isDuplicate(finalText, lastText)) return;
+
+        lastText = finalText;
 
         output.value += finalText + "\n";
         output.scrollTop = output.scrollHeight;
@@ -98,7 +130,7 @@ function initRecognition(lang) {
     };
 }
 
-// 初期言語
+// ★ 初期言語は日本語
 initRecognition("ja-JP");
 
 const output = document.getElementById("output");
@@ -112,6 +144,10 @@ const langSelect = document.getElementById("langSelect");
 langSelect.onchange = () => {
     const lang = langSelect.value;
     const wasRunning = isRecognizing;
+
+    // 判定リセット
+    lastText = "";
+    lastTime = 0;
 
     if (isRecognizing) {
         recognition.stop();
@@ -131,7 +167,9 @@ langSelect.onchange = () => {
 // 開始
 startBtn.onclick = () => {
     if (!isRecognizing) {
-        lastTail = "";   // ★ 重複判定リセット
+        lastText = "";
+        lastTime = 0;
+
         recognition.start();
         isRecognizing = true;
         output.value += "\n--- 録音開始 ---\n";
