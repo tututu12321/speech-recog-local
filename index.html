@@ -61,8 +61,8 @@ textarea {
 let recognition;
 let isRecognizing = false;
 
-// ★ 重複防止用：最後に確定した文
-let lastFinalText = "";
+// ★ 重複防止（語尾10文字を記録）
+let lastTail = "";
 
 // 初期化
 function initRecognition(lang) {
@@ -70,21 +70,24 @@ function initRecognition(lang) {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         recognition = new SR();
         recognition.lang = lang;
-        recognition.interimResults = false;   // ★ 二重起きやすい interim は切る
+        recognition.interimResults = false;
         recognition.continuous = true;
     } catch (e) {
         alert("SpeechRecognition API がサポートされていません。Chrome を使用してください。");
     }
 
     recognition.onresult = (event) => {
-        let finalText = event.results[event.results.length - 1][0].transcript;
+        let finalText = event.results[event.results.length - 1][0].transcript.trim();
 
-        // ★ 二重防止：前回と同じなら無視
-        if (finalText === lastFinalText) {
+        // ★ 文末10文字を抽出
+        const tailLen = 10;
+        const currentTail = finalText.slice(-tailLen);
+
+        // ★ 重複防止：文末一致で弾く
+        if (currentTail === lastTail) {
             return;
         }
-
-        lastFinalText = finalText;
+        lastTail = currentTail;
 
         output.value += finalText + "\n";
         output.scrollTop = output.scrollHeight;
@@ -125,15 +128,17 @@ langSelect.onchange = () => {
     output.value += `\n--- 言語を変更しました (${lang}) ---\n`;
 };
 
+// 開始
 startBtn.onclick = () => {
     if (!isRecognizing) {
-        lastFinalText = "";  // ★ 重複チェックリセット
+        lastTail = "";   // ★ 重複判定リセット
         recognition.start();
         isRecognizing = true;
         output.value += "\n--- 録音開始 ---\n";
     }
 };
 
+// 停止
 stopBtn.onclick = () => {
     if (isRecognizing) {
         recognition.stop();
@@ -165,4 +170,3 @@ copyBtn.onclick = () => {
 
 </body>
 </html>
-
