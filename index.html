@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>ローカル音声認識（ChatGPTプロンプト付き）</title>
+<title>ローカル音声認識（強化版）</title>
 
 <style>
 body {
@@ -26,7 +26,7 @@ textarea {
 </head>
 <body>
 
-<h2>ローカル音声認識（ChatGPTプロンプト付き / 日本語・英語切替）</h2>
+<h2>ローカル音声認識（強化版 / 日本語・英語切替）</h2>
 
 <label>言語：</label>
 <select id="langSelect">
@@ -39,21 +39,10 @@ textarea {
 <button id="saveBtn">保存</button>
 <button id="copyBtn">コピー</button>
 
-<p>
-※Google アカウント不要・APIキー不要<br>
-※Chrome推奨（Safari/Firefox不可）
-</p>
-
 <textarea id="output">
 【ChatGPTへの依頼】
 以下の「文字起こしテキスト」を自然な日本語に整形し、
-意味が通るように段落化・句読点挿入・誤認識修正をしてください。
-
-必要なら：
-・要約
-・話者ごとの整理
-・読みやすい文章化
-なども行ってください。
+意味が通るように句読点挿入・誤認識修正・段落化をしてください。
 
 ------------------------------
 【文字起こしテキストここから】
@@ -63,64 +52,69 @@ textarea {
 
 let recognition;
 let isRecognizing = false;
-
-// 前回の確定テキスト
 let lastText = "";
 
-// 母音・ノイズ暴走の簡易フィルタ（ゆるめ）
-function isNoisePattern(t) {
-    if (/([あいうえおアイウエオoaiue])\1{3,}/i.test(t)) return true;
-    if (/(\b\w+\b)( \1){3,}/i.test(t)) return true;
+// ノイズ・母音連打・意味のない短文を排除
+function isNoise(t) {
+    if (!t) return true;
+    if (t.length <= 1) return true;  
+    if (/([あいうえおアイウエオ])\1{2,}/.test(t)) return true;
+    if (/^[a-zA-Z]{1,2}$/.test(t)) return true;
+    if (/^([ﾊﾋﾌﾍﾎ])\1+$/.test(t)) return true;
     return false;
 }
 
-// 先頭80%が同じなら「ほぼ同じ」と判断
-function isTooSimilar(a, b) {
+// 類似文チェック
+function isSimilar(a, b) {
     if (!a || !b) return false;
-
-    const minLen = Math.min(a.length, b.length);
-    const seg = Math.floor(minLen * 0.8);
-
+    const min = Math.min(a.length, b.length);
+    if (min < 6) return false;
+    const seg = Math.floor(min * 0.75);
     return a.slice(0, seg) === b.slice(0, seg);
 }
 
-// 初期化
-function initRecognition(lang) {
-    try {
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        recognition = new SR();
-        recognition.lang = lang;
-        recognition.interimResults = false;
-        recognition.continuous = true;
-    } catch (e) {
-        alert("Chrome を使用してください。（音声認識 API 非対応）");
-        return;
+// 軽い句読点補完（日本語の場合のみ）
+function autoPunctuation(t, lang) {
+    if (lang === "ja-JP") {
+        if (!/[。！？」]$/.test(t)) {
+            return t + "。";
+        }
     }
+    return t;
+}
+
+// 音声認識セットアップ
+function initRecognition(lang) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.lang = lang;
+    recognition.interimResults = false;
+    recognition.continuous = true;
 
     recognition.onresult = (event) => {
-        const finalText = event.results[event.results.length - 1][0].transcript.trim();
+        let text = event.results[event.results.length - 1][0].transcript.trim();
+        if (isNoise(text)) return;
+        if (isSimilar(text, lastText)) return;
 
-        // ノイズ暴走排除（ゆるめ）
-        if (isNoisePattern(finalText)) return;
+        lastText = text;
 
-        // 80%類似 → 重複扱いで無視（暴走連鎖を止める）
-        if (isTooSimilar(finalText, lastText)) return;
+        text = autoPunctuation(text, lang);
 
-        lastText = finalText;
-
-        output.value += finalText + "\n";
+        output.value += text + "\n";
         output.scrollTop = output.scrollHeight;
     };
 
+    // 停止時に自動再起動
     recognition.onend = () => {
-        if (isRecognizing) recognition.start();
+        if (isRecognizing) {
+            setTimeout(() => recognition.start(), 200);
+        }
     };
 }
 
-// 初期言語
+// 初期化
 initRecognition("ja-JP");
 
-// DOM
 const output = document.getElementById("output");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
@@ -132,7 +126,6 @@ const langSelect = document.getElementById("langSelect");
 langSelect.onchange = () => {
     const lang = langSelect.value;
     const running = isRecognizing;
-
     lastText = "";
 
     if (isRecognizing) {
@@ -147,10 +140,10 @@ langSelect.onchange = () => {
         isRecognizing = true;
     }
 
-    output.value += `\n--- 言語を変更しました (${lang}) ---\n`;
+    output.value += `\n--- 言語切替: ${lang} ---\n`;
 };
 
-// 開始
+// 録音開始
 startBtn.onclick = () => {
     if (!isRecognizing) {
         lastText = "";
@@ -160,7 +153,7 @@ startBtn.onclick = () => {
     }
 };
 
-// 停止
+// 録音停止
 stopBtn.onclick = () => {
     if (isRecognizing) {
         recognition.stop();
@@ -185,9 +178,7 @@ saveBtn.onclick = () => {
 copyBtn.onclick = () => {
     output.select();
     document.execCommand("copy");
-    alert("コピーしました");
 };
-
 </script>
 
 </body>
